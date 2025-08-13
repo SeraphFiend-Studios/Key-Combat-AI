@@ -42,6 +42,35 @@ const imageCache = {};
 // Current card reveal information
 let currentReveal = null;
 
+// Background image for card view
+const cardViewBg = new Image();
+cardViewBg.src = 'assets/images/background/Card View Background.png';
+
+// Level-up configuration. Each entry defines how much a stat increases per level.
+// Stats not listed here (e.g., ultCharge) remain unchanged when leveling up.
+const LEVEL_UP_INCREMENTS = {
+    hp: 10,
+    atk: 2
+};
+
+function getLeveledStats(data, level) {
+    const hpInc = LEVEL_UP_INCREMENTS.hp || 0;
+    const atkInc = LEVEL_UP_INCREMENTS.atk || 0;
+    return {
+        hp: data.baseHP + (level - 1) * hpInc,
+        atk: data.baseAttack + (level - 1) * atkInc,
+        ultCharge: data.ultChargeNeeded
+    };
+}
+
+function applyLeveledStats(hero, data) {
+    const stats = getLeveledStats(data, hero.level);
+    hero.baseHP = stats.hp;
+    hero.baseAttack = stats.atk;
+    hero.ultChargeNeeded = stats.ultCharge;
+    hero.currentHP = hero.baseHP;
+}
+
 /**
  * Draw a card image centered on the canvas with responsive scaling.
  * The image scales to fit within 80% of the canvas dimensions, preserving aspect ratio.
@@ -68,6 +97,17 @@ function drawCardFrame(x, y, width, height) {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, width, height);
+}
+
+// Draw a background image covering the canvas while preserving aspect ratio.
+function drawBackground(img) {
+    if (!img || !img.complete) return;
+    const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
+    const drawWidth = img.width * scale;
+    const drawHeight = img.height * scale;
+    const x = (canvas.width - drawWidth) / 2;
+    const y = (canvas.height - drawHeight) / 2;
+    ctx.drawImage(img, x, y, drawWidth, drawHeight);
 }
 
 // Class representing a hero card
@@ -202,11 +242,7 @@ function gachaDraw() {
     const wasUnlocked = saveData.unlockedHeroes.includes(heroId);
     const oldLevel = saveData.heroLevels[heroId] || 0;
 
-    const oldStats = {
-        hp: heroData.baseHP + Math.max(0, oldLevel - 1) * 10,
-        atk: heroData.baseAttack + Math.max(0, oldLevel - 1) * 2,
-        ultCharge: Math.max(1, heroData.ultChargeNeeded - Math.max(0, oldLevel - 1))
-    };
+    const oldStats = getLeveledStats(heroData, Math.max(1, oldLevel));
 
     const newLevel = wasUnlocked ? oldLevel + 1 : 1;
     saveData.heroLevels[heroId] = newLevel;
@@ -214,11 +250,7 @@ function gachaDraw() {
         saveData.unlockedHeroes.push(heroId);
     }
 
-    const newStats = {
-        hp: heroData.baseHP + (newLevel - 1) * 10,
-        atk: heroData.baseAttack + (newLevel - 1) * 2,
-        ultCharge: Math.max(1, heroData.ultChargeNeeded - (newLevel - 1))
-    };
+    const newStats = getLeveledStats(heroData, newLevel);
 
     saveGameData();
 
@@ -286,11 +318,8 @@ function startNewRun() {
         const data = charactersData.find((h) => h.id === id);
         const hero = new Hero(data);
         hero.level = saveData.heroLevels[id] || 1;
-        // Scale HP, attack, and ult charge based on level
-        hero.baseHP = data.baseHP + (hero.level - 1) * 10;
-        hero.baseAttack = data.baseAttack + (hero.level - 1) * 2;
-        hero.ultChargeNeeded = Math.max(1, data.ultChargeNeeded - (hero.level - 1));
-        hero.currentHP = hero.baseHP;
+        // Scale stats based on level while keeping ult hits unchanged
+        applyLeveledStats(hero, data);
         playerHeroes.push(hero);
     });
     // Initialize enemies (first enemy only)
@@ -385,8 +414,7 @@ function drawCombat() {
 }
 
 function drawCardReveal() {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawBackground(cardViewBg);
 
     const hero = currentReveal.hero;
     const img = imageCache[hero.id];
