@@ -27,17 +27,20 @@ const GAME_STATES = {
     MENU: 'menu',
     MAP: 'map',
     COMBAT: 'combat',
-    GACHA: 'gacha'
+    CARD_REVEAL: 'card_reveal'
 };
 
 // Current game state
 let currentState = GAME_STATES.MENU;
 
-// Images for gacha display
-const gachaBgImg = new Image();
-gachaBgImg.src = 'assets/images/background/Card View Background.png';
-let gachaHeroImg = null;
-let gachaAnimTime = 0;
+// Filter heroes that have art assets available
+const availableHeroes = charactersData.filter((h) => h.image);
+
+// Simple image cache for hero portraits
+const imageCache = {};
+
+// Current card reveal information
+let currentReveal = null;
 
 /**
  * Draw a card image centered on the canvas with responsive scaling.
@@ -48,14 +51,23 @@ let gachaAnimTime = 0;
  * @param {number} [yOffset=0] Vertical offset in pixels.
  */
 function drawCardImage(img, scaleMultiplier = 1, yOffset = 0) {
-    const maxWidth = canvas.width * 0.8;
-    const maxHeight = canvas.height * 0.8;
-    const baseScale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+    const maxSize = Math.min(canvas.width, canvas.height) * 0.8;
+    const baseScale = Math.min(maxSize / img.width, maxSize / img.height, 1);
     const drawWidth = img.width * baseScale * scaleMultiplier;
     const drawHeight = img.height * baseScale * scaleMultiplier;
     const x = (canvas.width - drawWidth) / 2;
     const y = (canvas.height - drawHeight) / 2 + yOffset;
     ctx.drawImage(img, x, y, drawWidth, drawHeight);
+    return { x, y, width: drawWidth, height: drawHeight };
+}
+
+// Simple card frame to outline content
+function drawCardFrame(x, y, width, height) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, width, height);
 }
 
 // Class representing a hero card
@@ -180,54 +192,76 @@ function saveGameData() {
 }
 
 /**
- * Perform a gacha draw. Randomly selects a hero from charactersData.
- * If the hero is new, adds it to the collection; otherwise increments its level.
- * @returns {object} An object with the drawn hero data, resulting level, and whether it was new.
+ * Perform a gacha draw. Randomly selects a hero from the available pool.
+ * Updates save data and prepares a card reveal object for display.
  */
 function gachaDraw() {
-    const index = Math.floor(Math.random() * charactersData.length);
-    const heroData = charactersData[index];
+    const index = Math.floor(Math.random() * availableHeroes.length);
+    const heroData = availableHeroes[index];
     const heroId = heroData.id;
-    let isNew = false;
-    if (!saveData.unlockedHeroes.includes(heroId)) {
-        saveData.unlockedHeroes.push(heroId);
-        saveData.heroLevels[heroId] = 1;
-        isNew = true;
-    } else {
-        saveData.heroLevels[heroId] += 1;
-    }
-    saveGameData();
-    return {
-        hero: heroData,
-        level: saveData.heroLevels[heroId],
-        isNew: isNew
-    };
-}
+    const wasUnlocked = saveData.unlockedHeroes.includes(heroId);
+    const oldLevel = saveData.heroLevels[heroId] || 0;
 
-/**
- * Prepare images and animation timer for the gacha display.
- * @param {object} heroData Data for the hero that was drawn.
- */
-function prepareGachaDisplay(heroData) {
-    gachaAnimTime = 0;
-    gachaHeroImg = null;
-    if (heroData && heroData.image) {
-        gachaHeroImg = new Image();
-        gachaHeroImg.src = heroData.image;
+    const oldStats = {
+        hp: heroData.baseHP + Math.max(0, oldLevel - 1) * 10,
+        atk: heroData.baseAttack + Math.max(0, oldLevel - 1) * 2,
+        ultCharge: Math.max(1, heroData.ultChargeNeeded - Math.max(0, oldLevel - 1))
+    };
+
+    const newLevel = wasUnlocked ? oldLevel + 1 : 1;
+    saveData.heroLevels[heroId] = newLevel;
+    if (!wasUnlocked) {
+        saveData.unlockedHeroes.push(heroId);
     }
+
+    const newStats = {
+        hp: heroData.baseHP + (newLevel - 1) * 10,
+        atk: heroData.baseAttack + (newLevel - 1) * 2,
+        ultCharge: Math.max(1, heroData.ultChargeNeeded - (newLevel - 1))
+    };
+
+    saveGameData();
+
+    if (!imageCache[heroId]) {
+        const img = new Image();
+        img.src = heroData.image;
+        imageCache[heroId] = img;
+    }
+
+    currentReveal = {
+        hero: heroData,
+        isNew: !wasUnlocked,
+        oldStats: wasUnlocked ? oldStats : null,
+        newStats: newStats,
+        level: newLevel,
+        startTime: performance.now()
+    };
+    currentState = GAME_STATES.CARD_REVEAL;
 }
 
 // Initialize saveData when the script loads
 saveData = loadSaveData();
+// Remove heroes that no longer exist
+const validHeroIds = new Set(availableHeroes.map((h) => h.id));
+saveData.unlockedHeroes = saveData.unlockedHeroes.filter((id) => validHeroIds.has(id));
+for (const id in saveData.heroLevels) {
+    if (!validHeroIds.has(id)) {
+        delete saveData.heroLevels[id];
+    }
+}
 
-// Listen for gacha draw key when in menu state and for exiting the gacha screen
+// Listen for gacha draw key when in menu state and for exiting the reveal screen
 window.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
     if (currentState === GAME_STATES.MENU && key === 'g') {
-        lastGachaResult = gachaDraw();
-        prepareGachaDisplay(lastGachaResult.hero);
-        currentState = GAME_STATES.GACHA;
-    } else if (currentState === GAME_STATES.GACHA && e.key === 'Enter') {
+        gachaDraw();
+    } else if (currentState === GAME_STATES.CARD_REVEAL && e.key === 'Enter') {
+        lastGachaResult = {
+            hero: currentReveal.hero,
+            level: currentReveal.level,
+            isNew: currentReveal.isNew
+        };
+        currentReveal = null;
         currentState = GAME_STATES.MENU;
     }
 });
@@ -242,9 +276,9 @@ function startNewRun() {
     if (saveData.unlockedHeroes && saveData.unlockedHeroes.length >= 3) {
         heroIds.push(...saveData.unlockedHeroes.slice(0, 3));
     } else {
-        // Fallback: use the first few heroes from the master list
-        for (let i = 0; i < 3 && i < charactersData.length; i++) {
-            heroIds.push(charactersData[i].id);
+        // Fallback: use the first few heroes from the available list
+        for (let i = 0; i < 3 && i < availableHeroes.length; i++) {
+            heroIds.push(availableHeroes[i].id);
         }
     }
     // Instantiate heroes with level scaling
@@ -252,9 +286,10 @@ function startNewRun() {
         const data = charactersData.find((h) => h.id === id);
         const hero = new Hero(data);
         hero.level = saveData.heroLevels[id] || 1;
-        // Scale HP and attack based on level (simple linear scaling)
+        // Scale HP, attack, and ult charge based on level
         hero.baseHP = data.baseHP + (hero.level - 1) * 10;
         hero.baseAttack = data.baseAttack + (hero.level - 1) * 2;
+        hero.ultChargeNeeded = Math.max(1, data.ultChargeNeeded - (hero.level - 1));
         hero.currentHP = hero.baseHP;
         playerHeroes.push(hero);
     });
@@ -281,8 +316,8 @@ function update(dt) {
         case GAME_STATES.COMBAT:
             updateCombat(dt);
             break;
-        case GAME_STATES.GACHA:
-            gachaAnimTime += dt;
+        case GAME_STATES.CARD_REVEAL:
+            // No update needed for static reveal
             break;
     }
 }
@@ -303,8 +338,8 @@ function draw() {
         case GAME_STATES.COMBAT:
             drawCombat();
             break;
-        case GAME_STATES.GACHA:
-            drawGacha();
+        case GAME_STATES.CARD_REVEAL:
+            drawCardReveal();
             break;
     }
 }
@@ -349,30 +384,91 @@ function drawCombat() {
     ctx.fillText('Press the corresponding key to attack.', 20, 120 + playerHeroes.length * 40 + 20);
 }
 
-function drawGacha() {
-    // Background
-    if (gachaBgImg.complete) {
-        ctx.drawImage(gachaBgImg, 0, 0, canvas.width, canvas.height);
+function drawCardReveal() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const hero = currentReveal.hero;
+    const img = imageCache[hero.id];
+    const maxSize = Math.min(canvas.width, canvas.height) * 0.8;
+    const frameX = (canvas.width - maxSize) / 2;
+    const frameY = (canvas.height - maxSize) / 2;
+    drawCardFrame(frameX, frameY, maxSize, maxSize);
+
+    if (img && img.complete) {
+        drawCardImage(img);
     } else {
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    // Hero image with floating animation and responsive scaling
-    if (gachaHeroImg && gachaHeroImg.complete) {
-        const scaleAnim = 1 + 0.05 * Math.sin(gachaAnimTime * 3);
-        const yOffset = Math.sin(gachaAnimTime * 2) * 10;
-        drawCardImage(gachaHeroImg, scaleAnim, yOffset);
-    }
-    // Hero name and prompt
-    if (lastGachaResult) {
         ctx.fillStyle = '#fff';
+        ctx.font = '20px sans-serif';
         ctx.textAlign = 'center';
-        ctx.font = '24px sans-serif';
-        ctx.fillText(lastGachaResult.hero.name, canvas.width / 2, canvas.height - 80);
-        ctx.font = '16px sans-serif';
-        ctx.fillText('Press Enter to continue', canvas.width / 2, canvas.height - 40);
+        ctx.fillText('Loading...', canvas.width / 2, canvas.height / 2);
         ctx.textAlign = 'start';
     }
+
+    const alpha = Math.min(1, (performance.now() - currentReveal.startTime) / 500);
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = 'rgba(0,0,0,0.7)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+
+    ctx.textAlign = 'left';
+    let textX = frameX;
+    let textY = frameY + maxSize + 30;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px sans-serif';
+    ctx.fillText(hero.name, textX, textY);
+    textY += 24;
+
+    ctx.font = '16px sans-serif';
+    if (currentReveal.isNew) {
+        ctx.fillText(`HP: ${currentReveal.newStats.hp}`, textX, textY);
+        textY += 20;
+        ctx.fillText(`ATK: ${currentReveal.newStats.atk}`, textX, textY);
+        textY += 20;
+        ctx.fillText(`Ult Hits: ${currentReveal.newStats.ultCharge}`, textX, textY);
+        textY += 20;
+    } else {
+        ctx.fillStyle = '#fff';
+        let label = `HP: ${currentReveal.oldStats.hp} → `;
+        ctx.fillText(label, textX, textY);
+        let w = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgb(0,255,128)';
+        ctx.fillText(`${currentReveal.newStats.hp}`, textX + w, textY);
+        textY += 20;
+
+        ctx.fillStyle = '#fff';
+        label = `ATK: ${currentReveal.oldStats.atk} → `;
+        ctx.fillText(label, textX, textY);
+        w = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgb(0,255,128)';
+        ctx.fillText(`${currentReveal.newStats.atk}`, textX + w, textY);
+        textY += 20;
+
+        ctx.fillStyle = '#fff';
+        label = `Ult Hits: ${currentReveal.oldStats.ultCharge} → `;
+        ctx.fillText(label, textX, textY);
+        w = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgb(0,255,128)';
+        ctx.fillText(`${currentReveal.newStats.ultCharge}`, textX + w, textY);
+        textY += 20;
+    }
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`Ult: ${hero.ultEffect}`, textX, textY);
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('Press Enter to continue', canvas.width / 2, canvas.height - 40);
+    ctx.textAlign = 'start';
 }
 
 // ----- Menu and map drawing functions -----
