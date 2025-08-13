@@ -18,11 +18,18 @@ const ctx = canvas.getContext('2d');
 const GAME_STATES = {
     MENU: 'menu',
     MAP: 'map',
-    COMBAT: 'combat'
+    COMBAT: 'combat',
+    GACHA: 'gacha'
 };
 
 // Current game state
 let currentState = GAME_STATES.MENU;
+
+// Images for gacha display
+const gachaBgImg = new Image();
+gachaBgImg.src = 'assets/images/background/Card View Background.png';
+let gachaHeroImg = null;
+let gachaAnimTime = 0;
 
 // Class representing a hero card
 class Hero {
@@ -170,13 +177,31 @@ function gachaDraw() {
     };
 }
 
+/**
+ * Prepare images and animation timer for the gacha display.
+ * @param {object} heroData Data for the hero that was drawn.
+ */
+function prepareGachaDisplay(heroData) {
+    gachaAnimTime = 0;
+    gachaHeroImg = null;
+    if (heroData && heroData.image) {
+        gachaHeroImg = new Image();
+        gachaHeroImg.src = heroData.image;
+    }
+}
+
 // Initialize saveData when the script loads
 saveData = loadSaveData();
 
-// Listen for gacha draw key when in menu state
+// Listen for gacha draw key when in menu state and for exiting the gacha screen
 window.addEventListener('keydown', (e) => {
-    if (currentState === GAME_STATES.MENU && e.key.toLowerCase() === 'g') {
+    const key = e.key.toLowerCase();
+    if (currentState === GAME_STATES.MENU && key === 'g') {
         lastGachaResult = gachaDraw();
+        prepareGachaDisplay(lastGachaResult.hero);
+        currentState = GAME_STATES.GACHA;
+    } else if (currentState === GAME_STATES.GACHA && e.key === 'Enter') {
+        currentState = GAME_STATES.MENU;
     }
 });
 
@@ -229,6 +254,9 @@ function update(dt) {
         case GAME_STATES.COMBAT:
             updateCombat(dt);
             break;
+        case GAME_STATES.GACHA:
+            gachaAnimTime += dt;
+            break;
     }
 }
 
@@ -247,6 +275,9 @@ function draw() {
             break;
         case GAME_STATES.COMBAT:
             drawCombat();
+            break;
+        case GAME_STATES.GACHA:
+            drawGacha();
             break;
     }
 }
@@ -289,6 +320,36 @@ function drawCombat() {
         ctx.fillText(`${hero.name} (Key: ${hero.key.toUpperCase()}) HP: ${hero.currentHP}`, 20, y);
     });
     ctx.fillText('Press the corresponding key to attack.', 20, 120 + playerHeroes.length * 40 + 20);
+}
+
+function drawGacha() {
+    // Background
+    if (gachaBgImg.complete) {
+        ctx.drawImage(gachaBgImg, 0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    // Hero image with floating animation
+    if (gachaHeroImg && gachaHeroImg.complete) {
+        const scale = 1 + 0.05 * Math.sin(gachaAnimTime * 3);
+        const yOffset = Math.sin(gachaAnimTime * 2) * 10;
+        const imgW = gachaHeroImg.width * scale;
+        const imgH = gachaHeroImg.height * scale;
+        const x = (canvas.width - imgW) / 2;
+        const y = (canvas.height - imgH) / 2 + yOffset;
+        ctx.drawImage(gachaHeroImg, x, y, imgW, imgH);
+    }
+    // Hero name and prompt
+    if (lastGachaResult) {
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = '24px sans-serif';
+        ctx.fillText(lastGachaResult.hero.name, canvas.width / 2, canvas.height - 80);
+        ctx.font = '16px sans-serif';
+        ctx.fillText('Press Enter to continue', canvas.width / 2, canvas.height - 40);
+        ctx.textAlign = 'start';
+    }
 }
 
 // ----- Menu and map drawing functions -----
