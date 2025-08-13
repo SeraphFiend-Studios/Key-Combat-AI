@@ -14,6 +14,14 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// Resize canvas to fill the window and keep it updated on resize
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
 // Game states enumeration
 const GAME_STATES = {
     MENU: 'menu',
@@ -30,6 +38,25 @@ const gachaBgImg = new Image();
 gachaBgImg.src = 'assets/images/background/Card View Background.png';
 let gachaHeroImg = null;
 let gachaAnimTime = 0;
+
+/**
+ * Draw a card image centered on the canvas with responsive scaling.
+ * The image scales to fit within 80% of the canvas dimensions, preserving aspect ratio.
+ * scaleMultiplier allows for simple animations (e.g., breathing effects).
+ * @param {HTMLImageElement} img The image to draw.
+ * @param {number} [scaleMultiplier=1] Additional scale factor for animation.
+ * @param {number} [yOffset=0] Vertical offset in pixels.
+ */
+function drawCardImage(img, scaleMultiplier = 1, yOffset = 0) {
+    const maxWidth = canvas.width * 0.8;
+    const maxHeight = canvas.height * 0.8;
+    const baseScale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+    const drawWidth = img.width * baseScale * scaleMultiplier;
+    const drawHeight = img.height * baseScale * scaleMultiplier;
+    const x = (canvas.width - drawWidth) / 2;
+    const y = (canvas.height - drawHeight) / 2 + yOffset;
+    ctx.drawImage(img, x, y, drawWidth, drawHeight);
+}
 
 // Class representing a hero card
 class Hero {
@@ -330,15 +357,11 @@ function drawGacha() {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    // Hero image with floating animation
+    // Hero image with floating animation and responsive scaling
     if (gachaHeroImg && gachaHeroImg.complete) {
-        const scale = 1 + 0.05 * Math.sin(gachaAnimTime * 3);
+        const scaleAnim = 1 + 0.05 * Math.sin(gachaAnimTime * 3);
         const yOffset = Math.sin(gachaAnimTime * 2) * 10;
-        const imgW = gachaHeroImg.width * scale;
-        const imgH = gachaHeroImg.height * scale;
-        const x = (canvas.width - imgW) / 2;
-        const y = (canvas.height - imgH) / 2 + yOffset;
-        ctx.drawImage(gachaHeroImg, x, y, imgW, imgH);
+        drawCardImage(gachaHeroImg, scaleAnim, yOffset);
     }
     // Hero name and prompt
     if (lastGachaResult) {
