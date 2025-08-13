@@ -106,15 +106,107 @@ window.addEventListener('keyup', (e) => {
 });
 
 /**
+ * Persistent save data loaded from localStorage.
+ * Contains the player's unlocked heroes, hero levels, and Demon Souls currency.
+ */
+let saveData;
+
+/** Last gacha draw result. Used to display feedback in the menu. */
+let lastGachaResult = null;
+
+/**
+ * Load save data from localStorage. If no valid save exists, returns default values.
+ * @returns {object} The save data object.
+ */
+function loadSaveData() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('kca_save'));
+        if (saved && typeof saved === 'object') {
+            saved.unlockedHeroes = saved.unlockedHeroes || [];
+            saved.heroLevels = saved.heroLevels || {};
+            saved.demonSouls = saved.demonSouls || 0;
+            return saved;
+        }
+    } catch (e) {
+        console.warn('Failed to load save data', e);
+    }
+    // Default save structure
+    return { unlockedHeroes: [], heroLevels: {}, demonSouls: 0 };
+}
+
+/**
+ * Save the current saveData object into localStorage.
+ */
+function saveGameData() {
+    try {
+        localStorage.setItem('kca_save', JSON.stringify(saveData));
+    } catch (e) {
+        console.warn('Failed to save game data', e);
+    }
+}
+
+/**
+ * Perform a gacha draw. Randomly selects a hero from charactersData.
+ * If the hero is new, adds it to the collection; otherwise increments its level.
+ * @returns {object} An object with the drawn hero data, resulting level, and whether it was new.
+ */
+function gachaDraw() {
+    const index = Math.floor(Math.random() * charactersData.length);
+    const heroData = charactersData[index];
+    const heroId = heroData.id;
+    let isNew = false;
+    if (!saveData.unlockedHeroes.includes(heroId)) {
+        saveData.unlockedHeroes.push(heroId);
+        saveData.heroLevels[heroId] = 1;
+        isNew = true;
+    } else {
+        saveData.heroLevels[heroId] += 1;
+    }
+    saveGameData();
+    return {
+        hero: heroData,
+        level: saveData.heroLevels[heroId],
+        isNew: isNew
+    };
+}
+
+// Initialize saveData when the script loads
+saveData = loadSaveData();
+
+// Listen for gacha draw key when in menu state
+window.addEventListener('keydown', (e) => {
+    if (currentState === GAME_STATES.MENU && e.key.toLowerCase() === 'g') {
+        lastGachaResult = gachaDraw();
+    }
+});
+
+/**
  * Start a new run by selecting a party of heroes and initial enemies.
  */
 function startNewRun() {
-    // For demonstration, just take the first three heroes from the data
+    // Determine which heroes to use for this run. Prefer the player's unlocked heroes.
     playerHeroes = [];
-    for (let i = 0; i < 3 && i < charactersData.length; i++) {
-        playerHeroes.push(new Hero(charactersData[i]));
+    const heroIds = [];
+    if (saveData.unlockedHeroes && saveData.unlockedHeroes.length >= 3) {
+        heroIds.push(...saveData.unlockedHeroes.slice(0, 3));
+    } else {
+        // Fallback: use the first few heroes from the master list
+        for (let i = 0; i < 3 && i < charactersData.length; i++) {
+            heroIds.push(charactersData[i].id);
+        }
     }
-    // Pick the first enemy as the opponent
+    // Instantiate heroes with level scaling
+    heroIds.forEach((id) => {
+        const data = charactersData.find((h) => h.id === id);
+        const hero = new Hero(data);
+        hero.level = saveData.heroLevels[id] || 1;
+        // Scale HP and attack based on level (simple linear scaling)
+        hero.baseHP = data.baseHP + (hero.level - 1) * 10;
+        hero.baseAttack = data.baseAttack + (hero.level - 1) * 2;
+        hero.currentHP = hero.baseHP;
+        playerHeroes.push(hero);
+    });
+    // Initialize enemies (first enemy only)
     currentEnemies = [];
     if (enemiesData.length > 0) {
         currentEnemies.push(new Enemy(enemiesData[0]));
@@ -202,10 +294,41 @@ function drawCombat() {
 // ----- Menu and map drawing functions -----
 function drawMenu() {
     ctx.fillStyle = '#fff';
+    // Title
     ctx.font = '24px sans-serif';
-    ctx.fillText('Key Combat AI', 20, 100);
+    ctx.fillText('Key Combat AI', 20, 80);
+    // Instructions
     ctx.font = '18px sans-serif';
-    ctx.fillText('Press Enter to start a new run', 20, 140);
+    ctx.fillText('Press Enter to start a new run', 20, 120);
+    ctx.fillText('Press G to draw a card (Gacha)', 20, 150);
+    // Display last gacha result if available
+    if (lastGachaResult) {
+        ctx.font = '16px sans-serif';
+        const res = lastGachaResult;
+        const msg = res.isNew ? 'New card!' : 'Duplicate card!';
+        ctx.fillText(
+            `You drew: ${res.hero.name} (Level ${res.level}) - ${msg}`,
+            20,
+            180
+        );
+    }
+    // List unlocked heroes
+    ctx.font = '16px sans-serif';
+    ctx.fillText('Unlocked Heroes:', 20, 210);
+    if (saveData.unlockedHeroes.length > 0) {
+        saveData.unlockedHeroes.forEach((heroId, idx) => {
+            const data = charactersData.find((h) => h.id === heroId);
+            const level = saveData.heroLevels[heroId];
+            const y = 230 + idx * 20;
+            ctx.fillText(
+                `${data ? data.name : heroId} - Lv ${level}`,
+                20,
+                y
+            );
+        });
+    } else {
+        ctx.fillText('None', 20, 230);
+    }
 }
 
 function drawMap() {
