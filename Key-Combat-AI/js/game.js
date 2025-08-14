@@ -46,6 +46,98 @@ let currentReveal = null;
 const cardViewBg = new Image();
 cardViewBg.src = 'assets/images/background/Card View Background.png';
 
+// ----- UI tuning constants -----
+const UI = {
+    PANEL_BG: 'rgba(0,0,0,0.45)',
+    PANEL_RADIUS: 10,
+    PANEL_PADDING: 12,
+    PANEL_SHADOW: 'rgba(0,0,0,0.5)',
+    GUTTER: 24,
+    DIVIDER_ALPHA: 0.6
+};
+
+// Draw a rounded rectangle path
+function drawRoundedRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// Simple word-wrap helper
+function wrapText(ctx, text, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+        const test = line ? `${line} ${word}` : word;
+        if (ctx.measureText(test).width > maxWidth && line) {
+            lines.push(line);
+            line = word;
+        } else {
+            line = test;
+        }
+    }
+    if (line) lines.push(line);
+    return lines;
+}
+
+// Minimal stat glyphs
+function drawGlyph(type, x, y, size) {
+    ctx.save();
+    ctx.translate(x, y);
+    switch (type) {
+        case 'hp':
+            ctx.fillStyle = '#ff6b6b';
+            ctx.beginPath();
+            ctx.moveTo(0, size * 0.25);
+            ctx.bezierCurveTo(size * 0.5, -size * 0.25, size, -size * 0.25, 0, size);
+            ctx.bezierCurveTo(-size, -size * 0.25, -size * 0.5, -size * 0.25, 0, size * 0.25);
+            ctx.fill();
+            break;
+        case 'atk':
+            ctx.strokeStyle = '#f1c40f';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, -size / 2);
+            ctx.lineTo(0, size / 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, -size / 2);
+            ctx.lineTo(size / 4, -size / 2 + size / 4);
+            ctx.lineTo(-size / 4, -size / 2 + size / 4);
+            ctx.closePath();
+            ctx.fillStyle = '#f1c40f';
+            ctx.fill();
+            break;
+        case 'ult':
+            ctx.fillStyle = '#9b59b6';
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                const angle = -Math.PI / 2 + i * (2 * Math.PI / 5);
+                const x1 = Math.cos(angle) * size / 2;
+                const y1 = Math.sin(angle) * size / 2;
+                const angle2 = angle + Math.PI / 5;
+                const x2 = Math.cos(angle2) * size / 4;
+                const y2 = Math.sin(angle2) * size / 4;
+                if (i === 0) ctx.moveTo(x1, y1);
+                else ctx.lineTo(x1, y1);
+                ctx.lineTo(x2, y2);
+            }
+            ctx.closePath();
+            ctx.fill();
+            break;
+    }
+    ctx.restore();
+}
+
 // Level-up configuration. Each entry defines how much a stat increases per level.
 // Stats not listed here (e.g., ultCharge) remain unchanged when leveling up.
 const LEVEL_UP_INCREMENTS = {
@@ -108,32 +200,6 @@ function drawBackground(img) {
     const x = (canvas.width - drawWidth) / 2;
     const y = (canvas.height - drawHeight) / 2;
     ctx.drawImage(img, x, y, drawWidth, drawHeight);
-}
-
-/**
- * Simple multi-line text wrapper for canvas.
- * Returns an array of lines that fit within maxWidth using the specified font.
- * @param {string} text The text to wrap.
- * @param {number} maxWidth The maximum width for each line.
- * @param {string} font Font string (e.g., "16px sans-serif").
- * @returns {string[]} Wrapped lines.
- */
-function wrapText(text, maxWidth, font) {
-    ctx.font = font;
-    const words = text.split(' ');
-    const lines = [];
-    let line = '';
-    for (const word of words) {
-        const testLine = line ? `${line} ${word}` : word;
-        if (ctx.measureText(testLine).width > maxWidth && line) {
-            lines.push(line);
-            line = word;
-        } else {
-            line = testLine;
-        }
-    }
-    if (line) lines.push(line);
-    return lines;
 }
 
 // Class representing a hero card
@@ -463,48 +529,44 @@ function drawCardReveal() {
 
     const alpha = Math.min(1, (performance.now() - currentReveal.startTime) / 500);
     ctx.globalAlpha = alpha;
-    ctx.shadowColor = 'rgba(0,0,0,0.7)';
-    ctx.shadowBlur = 4;
-    ctx.shadowOffsetX = 2;
-    ctx.shadowOffsetY = 2;
+
     // ----- Stats panel layout -----
-    const availableRight = canvas.width - (cardRect.x + cardRect.width) - 16;
-    const sideBySide = availableRight - 24 >= 200;
+    const availableRight = canvas.width - (cardRect.x + cardRect.width) - UI.GUTTER;
+    const sideBySide = availableRight >= 200;
     let panelX, panelY, panelWidth;
     if (sideBySide) {
-        panelX = cardRect.x + cardRect.width + 24;
-        panelWidth = canvas.width - panelX - 16;
+        panelX = cardRect.x + cardRect.width + UI.GUTTER;
+        panelWidth = canvas.width - panelX - UI.PANEL_PADDING;
         panelY = cardRect.y;
     } else {
-        panelWidth = Math.min(cardRect.width, canvas.width - 32);
+        panelWidth = Math.min(cardRect.width, canvas.width - UI.PANEL_PADDING * 2);
         panelX = (canvas.width - panelWidth) / 2;
-        panelY = cardRect.y + cardRect.height + 24;
+        panelY = cardRect.y + cardRect.height + UI.GUTTER;
     }
 
-    const scale = canvas.width / 375;
-    const nameSize = Math.max(14, Math.min(32, 22 * scale));
-    const labelSize = Math.max(14, Math.min(24, 16 * scale));
-    const valueSize = Math.max(14, Math.min(28, 20 * scale));
-    const descSize = Math.max(14, Math.min(22, 16 * scale));
+    const h = canvas.height;
+    const nameSize = Math.max(22, h * 0.03);
+    const valueSize = Math.max(20, h * 0.025);
+    const labelSize = Math.max(16, h * 0.022);
+    const descSize = labelSize;
+    const lineHeight = Math.max(16, descSize * 1.2);
+    const iconSize = labelSize * 0.9;
+    const rowHeight = Math.max(valueSize, iconSize);
+    const rowGap = 8;
 
-    const padding = 10;
-    const panelContentWidth = panelWidth - padding * 2;
-    ctx.font = `600 ${labelSize}px sans-serif`;
-    const ultLabelWidth = ctx.measureText('Ult:').width + 8;
-    const descLines = wrapText(hero.ultEffect, panelContentWidth - ultLabelWidth, `${descSize}px sans-serif`);
+    const panelContentWidth = panelWidth - UI.PANEL_PADDING * 2;
+    ctx.font = `${labelSize}px sans-serif`;
+    const ultLabelWidth = ctx.measureText('Ult:').width + 4;
+    ctx.font = `${descSize}px sans-serif`;
+    const descLines = wrapText(ctx, hero.ultEffect, panelContentWidth - ultLabelWidth, lineHeight);
 
-    const statRowHeight = Math.max(labelSize, valueSize);
-    const gap = 8;
-    const lineGap = 4;
-
-    let panelHeight = padding;
-    panelHeight += nameSize + gap + 1 + gap;
-    panelHeight += statRowHeight + gap + 1 + gap;
-    panelHeight += statRowHeight + gap + 1 + gap;
-    panelHeight += statRowHeight + gap + 1 + gap;
-    panelHeight += Math.max(labelSize, descSize);
-    panelHeight += (descLines.length - 1) * (descSize + lineGap);
-    panelHeight += padding;
+    let panelHeight = UI.PANEL_PADDING + nameSize + rowGap;
+    for (let i = 0; i < 3; i++) {
+        panelHeight += rowHeight;
+        panelHeight += (i < 2 ? rowGap * 2 + 1 : rowGap);
+    }
+    panelHeight += descLines.length * lineHeight;
+    panelHeight += UI.PANEL_PADDING;
 
     if (!sideBySide) {
         const promptY = canvas.height - 40;
@@ -513,81 +575,118 @@ function drawCardReveal() {
         }
     }
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-    ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+    ctx.save();
+    ctx.shadowColor = UI.PANEL_SHADOW;
+    ctx.shadowBlur = 6;
+    drawRoundedRect(ctx, panelX, panelY, panelWidth, panelHeight, UI.PANEL_RADIUS);
+    ctx.fillStyle = UI.PANEL_BG;
+    ctx.fill();
+    ctx.restore();
 
     ctx.textAlign = 'left';
-    let cursorY = panelY + padding;
+    let cursorY = panelY + UI.PANEL_PADDING;
 
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${nameSize}px sans-serif`;
-    ctx.fillText(hero.name, panelX + padding, cursorY + nameSize);
-    cursorY += nameSize + gap;
+    const nameX = panelX + UI.PANEL_PADDING;
+    const nameBaseline = cursorY + nameSize;
+    ctx.fillText(hero.name, nameX, nameBaseline);
+    const nameWidth = ctx.measureText(hero.name).width;
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(panelX + padding, cursorY);
-    ctx.lineTo(panelX + panelWidth - padding, cursorY);
-    ctx.stroke();
-    cursorY += gap;
+    // Role badge
+    const badgeText = hero.type;
+    const badgeFontSize = Math.max(12, labelSize * 0.8);
+    ctx.font = `${badgeFontSize}px sans-serif`;
+    const badgeTextWidth = ctx.measureText(badgeText).width;
+    const badgeWidth = badgeTextWidth + 12;
+    const badgeHeight = badgeFontSize + 4;
+    const badgeX = nameX + nameWidth + 8;
+    const badgeY = nameBaseline - badgeHeight + 2;
+    ctx.fillStyle = hero.type === 'Attack' ? 'rgba(230,126,34,0.9)' : 'rgba(52,152,219,0.9)';
+    drawRoundedRect(ctx, badgeX, badgeY, badgeWidth, badgeHeight, badgeHeight / 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
 
-    const drawStatRow = (label, oldVal, newVal) => {
-        ctx.font = `600 ${labelSize}px sans-serif`;
+    cursorY += nameSize + rowGap;
+
+    const valueX = panelX + panelWidth - UI.PANEL_PADDING;
+
+    const drawRow = (label, icon, oldVal, newVal, isLast) => {
+        const baseY = cursorY + rowHeight / 2;
+        drawGlyph(icon, panelX + UI.PANEL_PADDING + iconSize / 2, baseY, iconSize);
+        ctx.font = `${labelSize}px sans-serif`;
         ctx.fillStyle = '#fff';
-        const labelX = panelX + padding;
-        const labelY = cursorY + statRowHeight;
-        ctx.fillText(label, labelX, labelY);
-        const labelWidth = ctx.measureText(label).width + 8;
+        ctx.fillText(label, panelX + UI.PANEL_PADDING + iconSize + 6, cursorY + rowHeight);
+
+        const oldStr = oldVal === newVal ? '' : `${oldVal} → `;
+        ctx.font = `${valueSize}px sans-serif`;
+        const oldWidth = ctx.measureText(oldStr).width;
         ctx.font = `bold ${valueSize}px sans-serif`;
-        if (currentReveal.isNew) {
-            ctx.fillText(`${newVal}`, labelX + labelWidth, labelY);
-        } else {
-            ctx.fillText(`${oldVal}`, labelX + labelWidth, labelY);
-            const oldWidth = ctx.measureText(`${oldVal}`).width;
-            ctx.font = `600 ${labelSize}px sans-serif`;
-            ctx.fillText(' → ', labelX + labelWidth + oldWidth, labelY);
-            const arrowWidth = ctx.measureText(' → ').width;
+        const newWidth = ctx.measureText(`${newVal}`).width;
+        const startX = valueX - oldWidth - newWidth;
+
+        if (oldStr) {
+            ctx.font = `${valueSize}px sans-serif`;
+            ctx.fillStyle = '#fff';
+            ctx.fillText(oldStr, startX, cursorY + rowHeight);
             ctx.font = `bold ${valueSize}px sans-serif`;
             ctx.fillStyle = 'rgb(0,255,128)';
-            ctx.fillText(`${newVal}`, labelX + labelWidth + oldWidth + arrowWidth, labelY);
+            ctx.fillText(`${newVal}`, startX + oldWidth, cursorY + rowHeight);
+        } else {
+            ctx.font = `bold ${valueSize}px sans-serif`;
             ctx.fillStyle = '#fff';
+            ctx.fillText(`${newVal}`, startX, cursorY + rowHeight);
         }
-        cursorY += statRowHeight + gap;
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(panelX + padding, cursorY);
-        ctx.lineTo(panelX + panelWidth - padding, cursorY);
-        ctx.stroke();
-        cursorY += gap;
+
+        cursorY += rowHeight;
+        if (!isLast) {
+            cursorY += rowGap;
+            ctx.strokeStyle = `rgba(255,255,255,${UI.DIVIDER_ALPHA})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(panelX + UI.PANEL_PADDING, cursorY + 0.5);
+            ctx.lineTo(panelX + panelWidth - UI.PANEL_PADDING, cursorY + 0.5);
+            ctx.stroke();
+            cursorY += rowGap;
+        } else {
+            cursorY += rowGap;
+        }
     };
 
-    drawStatRow('HP', currentReveal.oldStats.hp, currentReveal.newStats.hp);
-    drawStatRow('ATK', currentReveal.oldStats.atk, currentReveal.newStats.atk);
-    drawStatRow('Ult Hits', currentReveal.oldStats.ultCharge, currentReveal.newStats.ultCharge);
+    drawRow('HP', 'hp', currentReveal.oldStats.hp, currentReveal.newStats.hp, false);
+    drawRow('ATK', 'atk', currentReveal.oldStats.atk, currentReveal.newStats.atk, false);
+    drawRow('Ult Hits', 'ult', currentReveal.oldStats.ultCharge, currentReveal.newStats.ultCharge, true);
 
-    ctx.font = `600 ${labelSize}px sans-serif`;
-    const ultLabelX = panelX + padding;
-    const ultLabelY = cursorY + Math.max(labelSize, descSize);
-    ctx.fillText('Ult:', ultLabelX, ultLabelY);
+    // Ult description
+    ctx.font = `${labelSize}px sans-serif`;
+    ctx.fillStyle = '#fff';
+    const ultLabel = 'Ult:';
+    ctx.fillText(ultLabel, panelX + UI.PANEL_PADDING, cursorY + lineHeight);
+    const labelWidth = ctx.measureText(ultLabel + ' ').width;
     ctx.font = `${descSize}px sans-serif`;
-    let descY = cursorY + Math.max(labelSize, descSize);
-    descLines.forEach((line) => {
-        ctx.fillText(line, ultLabelX + ultLabelWidth, descY);
-        descY += descSize + lineGap;
+    const descX = panelX + UI.PANEL_PADDING + labelWidth;
+    descLines.forEach((line, i) => {
+        ctx.fillText(line, descX, cursorY + lineHeight * (i + 1));
     });
+    cursorY += descLines.length * lineHeight;
 
     ctx.globalAlpha = 1;
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
 
+    // Prompt
     ctx.textAlign = 'center';
+    const promptFont = Math.max(16, h * 0.02);
+    ctx.font = `${promptFont}px sans-serif`;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.strokeText('Press Enter to continue', canvas.width / 2, canvas.height - 40);
     ctx.fillStyle = '#fff';
-    ctx.font = '16px sans-serif';
     ctx.fillText('Press Enter to continue', canvas.width / 2, canvas.height - 40);
-    ctx.textAlign = 'start';
+    ctx.textAlign = 'left';
 }
 
 // ----- Menu and map drawing functions -----
