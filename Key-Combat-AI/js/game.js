@@ -110,6 +110,32 @@ function drawBackground(img) {
     ctx.drawImage(img, x, y, drawWidth, drawHeight);
 }
 
+/**
+ * Simple multi-line text wrapper for canvas.
+ * Returns an array of lines that fit within maxWidth using the specified font.
+ * @param {string} text The text to wrap.
+ * @param {number} maxWidth The maximum width for each line.
+ * @param {string} font Font string (e.g., "16px sans-serif").
+ * @returns {string[]} Wrapped lines.
+ */
+function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+        const testLine = line ? `${line} ${word}` : word;
+        if (ctx.measureText(testLine).width > maxWidth && line) {
+            lines.push(line);
+            line = word;
+        } else {
+            line = testLine;
+        }
+    }
+    if (line) lines.push(line);
+    return lines;
+}
+
 // Class representing a hero card
 class Hero {
     constructor(data) {
@@ -423,14 +449,16 @@ function drawCardReveal() {
     const frameY = (canvas.height - maxSize) / 2;
     drawCardFrame(frameX, frameY, maxSize, maxSize);
 
+    let cardRect;
     if (img && img.complete) {
-        drawCardImage(img);
+        cardRect = drawCardImage(img);
     } else {
         ctx.fillStyle = '#fff';
         ctx.font = '20px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('Loading...', canvas.width / 2, canvas.height / 2);
         ctx.textAlign = 'start';
+        cardRect = { x: frameX, y: frameY, width: maxSize, height: maxSize };
     }
 
     const alpha = Math.min(1, (performance.now() - currentReveal.startTime) / 500);
@@ -439,53 +467,116 @@ function drawCardReveal() {
     ctx.shadowBlur = 4;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 2;
-
-    ctx.textAlign = 'left';
-    let textX = frameX;
-    let textY = frameY + maxSize + 30;
-
-    ctx.fillStyle = '#fff';
-    ctx.font = '20px sans-serif';
-    ctx.fillText(hero.name, textX, textY);
-    textY += 24;
-
-    ctx.font = '16px sans-serif';
-    if (currentReveal.isNew) {
-        ctx.fillText(`HP: ${currentReveal.newStats.hp}`, textX, textY);
-        textY += 20;
-        ctx.fillText(`ATK: ${currentReveal.newStats.atk}`, textX, textY);
-        textY += 20;
-        ctx.fillText(`Ult Hits: ${currentReveal.newStats.ultCharge}`, textX, textY);
-        textY += 20;
+    // ----- Stats panel layout -----
+    const availableRight = canvas.width - (cardRect.x + cardRect.width) - 16;
+    const sideBySide = availableRight - 24 >= 200;
+    let panelX, panelY, panelWidth;
+    if (sideBySide) {
+        panelX = cardRect.x + cardRect.width + 24;
+        panelWidth = canvas.width - panelX - 16;
+        panelY = cardRect.y;
     } else {
-        ctx.fillStyle = '#fff';
-        let label = `HP: ${currentReveal.oldStats.hp} → `;
-        ctx.fillText(label, textX, textY);
-        let w = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgb(0,255,128)';
-        ctx.fillText(`${currentReveal.newStats.hp}`, textX + w, textY);
-        textY += 20;
-
-        ctx.fillStyle = '#fff';
-        label = `ATK: ${currentReveal.oldStats.atk} → `;
-        ctx.fillText(label, textX, textY);
-        w = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgb(0,255,128)';
-        ctx.fillText(`${currentReveal.newStats.atk}`, textX + w, textY);
-        textY += 20;
-
-        ctx.fillStyle = '#fff';
-        label = `Ult Hits: ${currentReveal.oldStats.ultCharge} → `;
-        ctx.fillText(label, textX, textY);
-        w = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgb(0,255,128)';
-        ctx.fillText(`${currentReveal.newStats.ultCharge}`, textX + w, textY);
-        textY += 20;
+        panelWidth = Math.min(cardRect.width, canvas.width - 32);
+        panelX = (canvas.width - panelWidth) / 2;
+        panelY = cardRect.y + cardRect.height + 24;
     }
 
+    const scale = canvas.width / 375;
+    const nameSize = Math.max(14, Math.min(32, 22 * scale));
+    const labelSize = Math.max(14, Math.min(24, 16 * scale));
+    const valueSize = Math.max(14, Math.min(28, 20 * scale));
+    const descSize = Math.max(14, Math.min(22, 16 * scale));
+
+    const padding = 10;
+    const panelContentWidth = panelWidth - padding * 2;
+    ctx.font = `600 ${labelSize}px sans-serif`;
+    const ultLabelWidth = ctx.measureText('Ult:').width + 8;
+    const descLines = wrapText(hero.ultEffect, panelContentWidth - ultLabelWidth, `${descSize}px sans-serif`);
+
+    const statRowHeight = Math.max(labelSize, valueSize);
+    const gap = 8;
+    const lineGap = 4;
+
+    let panelHeight = padding;
+    panelHeight += nameSize + gap + 1 + gap;
+    panelHeight += statRowHeight + gap + 1 + gap;
+    panelHeight += statRowHeight + gap + 1 + gap;
+    panelHeight += statRowHeight + gap + 1 + gap;
+    panelHeight += Math.max(labelSize, descSize);
+    panelHeight += (descLines.length - 1) * (descSize + lineGap);
+    panelHeight += padding;
+
+    if (!sideBySide) {
+        const promptY = canvas.height - 40;
+        if (panelY + panelHeight > promptY - 16) {
+            panelY = Math.max(16, promptY - 16 - panelHeight);
+        }
+    }
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+
+    ctx.textAlign = 'left';
+    let cursorY = panelY + padding;
+
     ctx.fillStyle = '#fff';
-    ctx.font = '16px sans-serif';
-    ctx.fillText(`Ult: ${hero.ultEffect}`, textX, textY);
+    ctx.font = `bold ${nameSize}px sans-serif`;
+    ctx.fillText(hero.name, panelX + padding, cursorY + nameSize);
+    cursorY += nameSize + gap;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + padding, cursorY);
+    ctx.lineTo(panelX + panelWidth - padding, cursorY);
+    ctx.stroke();
+    cursorY += gap;
+
+    const drawStatRow = (label, oldVal, newVal) => {
+        ctx.font = `600 ${labelSize}px sans-serif`;
+        ctx.fillStyle = '#fff';
+        const labelX = panelX + padding;
+        const labelY = cursorY + statRowHeight;
+        ctx.fillText(label, labelX, labelY);
+        const labelWidth = ctx.measureText(label).width + 8;
+        ctx.font = `bold ${valueSize}px sans-serif`;
+        if (currentReveal.isNew) {
+            ctx.fillText(`${newVal}`, labelX + labelWidth, labelY);
+        } else {
+            ctx.fillText(`${oldVal}`, labelX + labelWidth, labelY);
+            const oldWidth = ctx.measureText(`${oldVal}`).width;
+            ctx.font = `600 ${labelSize}px sans-serif`;
+            ctx.fillText(' → ', labelX + labelWidth + oldWidth, labelY);
+            const arrowWidth = ctx.measureText(' → ').width;
+            ctx.font = `bold ${valueSize}px sans-serif`;
+            ctx.fillStyle = 'rgb(0,255,128)';
+            ctx.fillText(`${newVal}`, labelX + labelWidth + oldWidth + arrowWidth, labelY);
+            ctx.fillStyle = '#fff';
+        }
+        cursorY += statRowHeight + gap;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(panelX + padding, cursorY);
+        ctx.lineTo(panelX + panelWidth - padding, cursorY);
+        ctx.stroke();
+        cursorY += gap;
+    };
+
+    drawStatRow('HP', currentReveal.oldStats.hp, currentReveal.newStats.hp);
+    drawStatRow('ATK', currentReveal.oldStats.atk, currentReveal.newStats.atk);
+    drawStatRow('Ult Hits', currentReveal.oldStats.ultCharge, currentReveal.newStats.ultCharge);
+
+    ctx.font = `600 ${labelSize}px sans-serif`;
+    const ultLabelX = panelX + padding;
+    const ultLabelY = cursorY + Math.max(labelSize, descSize);
+    ctx.fillText('Ult:', ultLabelX, ultLabelY);
+    ctx.font = `${descSize}px sans-serif`;
+    let descY = cursorY + Math.max(labelSize, descSize);
+    descLines.forEach((line) => {
+        ctx.fillText(line, ultLabelX + ultLabelWidth, descY);
+        descY += descSize + lineGap;
+    });
 
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
